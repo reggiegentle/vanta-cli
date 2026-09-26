@@ -2,6 +2,7 @@
 import { Command } from "commander";
 import * as auth from "./auth.js";
 import { SCOPE_READ } from "./config.js";
+import { registerLedgerCommand } from "./ledger.js";
 import { codeError } from "./output.js";
 import {
   configureParserContract,
@@ -79,6 +80,8 @@ program
       return report;
     }, opts);
   });
+
+registerLedgerCommand(program);
 
 configureParserContract(program);
 program.parseAsync(process.argv).catch(handleParseFailure);
