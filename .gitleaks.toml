@@ -1,0 +1,18 @@
+title = "vanta-cli gitleaks config"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "vanta-oauth-client-secret"
+description = "Detected a possible Vanta OAuth client secret environment value."
+regex = '''\b(?:VANTA_OAUTH_CLIENT_SECRET|VANTA_CLIENT_SECRET)=(vcs_[A-Za-z0-9]{16,})'''
+secretGroup = 1
+keywords = ["VANTA_OAUTH_CLIENT_SECRET", "VANTA_CLIENT_SECRET"]
+
+[[rules]]
+id = "vanta-client-secret-literal"
+description = "Detected a possible bare Vanta client secret literal."
+regex = '''\b(vcs_[A-Za-z0-9]{16,})\b'''
+secretGroup = 0
+keywords = ["vcs_"]

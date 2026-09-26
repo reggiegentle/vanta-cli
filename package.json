@@ -1,0 +1,64 @@
+{
+  "name": "@reggiegentle/vanta-cli",
+  "version": "0.1.0",
+  "description": "Agent-first CLI for the official Vanta Manage API",
+  "license": "MIT",
+  "author": "Reggie Gentle",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/reggiegentle/vanta-cli.git"
+  },
+  "homepage": "https://github.com/reggiegentle/vanta-cli#readme",
+  "bugs": {
+    "url": "https://github.com/reggiegentle/vanta-cli/issues"
+  },
+  "bin": {
+    "vanta": "dist/cli.js",
+    "vanta-cli": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "skills",
+    "README.md",
+    "SECURITY.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "vanta",
+    "soc2",
+    "compliance",
+    "security",
+    "cli",
+    "agent-first"
+  ],
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "npm run clean && tsc -p tsconfig.build.json && node -e \"require('node:fs').chmodSync('dist/cli.js',0o755)\"",
+    "dev": "tsx src/cli.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "npm run typecheck",
+    "lint:public-surface": "node scripts/public-surface-check.mjs",
+    "secret-sweep": "bash scripts/secret-sweep.sh",
+    "check:release": "npm run typecheck && npm test && npm run lint:public-surface && npm run secret-sweep",
+    "pretest": "npm run build",
+    "test": "node --test tests/*.test.js",
+    "prepublishOnly": "npm run check:release",
+    "prepare": "npm run build",
+    "start": "node dist/cli.js"
+  },
+  "dependencies": {
+    "commander": "^15.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
