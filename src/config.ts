@@ -365,6 +365,7 @@ function makeReleaseFn(lockPath: string, nonce: string): () => Promise<void> {
 
 const GUARD_LIVE_WAIT_MS = 5_000;
 const GUARD_POLL_INTERVAL_MS = 50;
+const MALFORMED_GRACE_MS = 2_000;
 
 export async function acquireGuard(): Promise<() => Promise<void>> {
   const guardPath = getLockGuardPath();
@@ -375,6 +376,7 @@ export async function acquireGuard(): Promise<() => Promise<void>> {
   // the wait. Recomputing a fresh deadline on every new "live" sighting
   // would let acquisition wait indefinitely under contention.
   const deadline = Date.now() + GUARD_LIVE_WAIT_MS;
+  let malformedSince: number | null = null;
 
   for (;;) {
     let handle;
@@ -391,11 +393,22 @@ export async function acquireGuard(): Promise<() => Promise<void>> {
         await sleep(GUARD_POLL_INTERVAL_MS);
         continue;
       }
-      // dead or malformed, observed at any point: only --force clears the guard.
-      throw codeError(
-        "LOCKED",
-        `guard left by a dead or malformed holder at ${guardPath}; run 'vanta auth unlock --force' to clear it.`,
-      );
+      if (classification.status === "dead") {
+        throw codeError(
+          "LOCKED",
+          `guard left by a dead holder at ${guardPath}; run 'vanta auth unlock --force' to clear it.`,
+        );
+      }
+      // classification.status === "malformed"
+      malformedSince = malformedSince ?? Date.now();
+      if (Date.now() - malformedSince > MALFORMED_GRACE_MS || Date.now() >= deadline) {
+        throw codeError(
+          "LOCKED",
+          `guard left by a malformed holder at ${guardPath}; confirm no vanta process is running ('pgrep -f vanta') and run 'vanta auth unlock --force'.`,
+        );
+      }
+      await sleep(GUARD_POLL_INTERVAL_MS);
+      continue;
     }
 
     const nonce = crypto.randomBytes(16).toString("hex");
@@ -429,7 +442,6 @@ type LockCreateOutcome =
   | { acquired: false; classification: LockClassification };
 
 const LOCK_POLL_INTERVAL_MS = 200;
-const MALFORMED_GRACE_MS = 2_000;
 
 export async function acquireLock(lockPath: string): Promise<() => Promise<void>> {
   const waitMs = resolveLockWaitMs();
