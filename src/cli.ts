@@ -10,6 +10,22 @@ import {
   handleParseFailure,
   runJsonAction,
 } from "./cli-runtime.js";
+import {
+  registerControlsCommand,
+  registerDocumentsCommand,
+  registerFrameworksCommand,
+  registerPoliciesCommand,
+  registerTestsCommand,
+} from "./reads-a.js";
+import {
+  registerApiCommand,
+  registerIntegrationsCommand,
+  registerPeopleCommand,
+  registerRiskScenariosCommand,
+  registerUsersCommand,
+  registerVendorsCommand,
+} from "./reads-b.js";
+import { registerControlWriteCommands, registerDocumentWriteCommands } from "./writes.js";
 
 const program = new Command();
 program
@@ -80,6 +96,22 @@ program
       return report;
     }, opts);
   });
+
+registerFrameworksCommand(program);
+const controlsCmd = registerControlsCommand(program);
+registerTestsCommand(program);
+const documentsCmd = registerDocumentsCommand(program);
+registerPoliciesCommand(program);
+
+registerDocumentWriteCommands(documentsCmd);
+registerControlWriteCommands(controlsCmd);
+
+registerPeopleCommand(program);
+registerUsersCommand(program);
+registerVendorsCommand(program);
+registerRiskScenariosCommand(program);
+registerIntegrationsCommand(program);
+registerApiCommand(program);
 
 registerLedgerCommand(program);
 
