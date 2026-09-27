@@ -26,6 +26,7 @@ import {
   registerVendorsCommand,
 } from "./reads-b.js";
 import { registerControlWriteCommands, registerDocumentWriteCommands } from "./writes.js";
+import { registerEvidenceCommand, registerSoc2Command } from "./reports.js";
 
 const program = new Command();
 program
@@ -114,6 +115,9 @@ registerIntegrationsCommand(program);
 registerApiCommand(program);
 
 registerLedgerCommand(program);
+
+registerSoc2Command(program);
+registerEvidenceCommand(program);
 
 configureParserContract(program);
 program.parseAsync(process.argv).catch(handleParseFailure);
