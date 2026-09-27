@@ -232,21 +232,32 @@ export interface IdInListReadbackResult {
 
 /**
  * List-creation writes (upload, link, both add-document forms). preRead()
- * and call() propagate any throw as-is (nothing has been attempted, or no
- * mutation happened). Round-10 blocker fix: once call() has succeeded,
- * identity extraction, postRead(), and the comparison itself are all one
- * protected try; any failure inside it becomes {verified: false,
- * readbackError}, never rethrown, with id left undefined if extraction
- * itself never completed.
+ * propagates any throw as-is (nothing has been attempted). Task 013 fix:
+ * call() no longer propagates its own throw as-is; a failure there is
+ * caught and rethrown as CHECK_FAILED with detail: {ids, callError}, since
+ * that is the affected write's own known-before-the-call ids plus the
+ * caught error, normalized, per spec.md D9's corrected envelope shape.
+ * Round-10 blocker fix: once call() has succeeded, identity extraction,
+ * postRead(), and the comparison itself are all one protected try; any
+ * failure inside it becomes {verified: false, readbackError}, never
+ * rethrown, with id left undefined if extraction itself never completed.
  */
 export async function readbackByIdInList<T extends { id: string }>(
   preRead: () => Promise<T[]>,
   call: () => Promise<unknown>,
   postRead: () => Promise<T[]>,
   extractId: (callResult: unknown) => string,
+  ids: Record<string, string | undefined>,
 ): Promise<IdInListReadbackResult> {
   const preRows = await preRead();
-  const callResult = await call();
+  let callResult: unknown;
+  try {
+    callResult = await call();
+  } catch (err) {
+    throw codeError("CHECK_FAILED", "the write's own API call failed before any readback could run.", {
+      detail: { ids, callError: toReadbackError(err) },
+    });
+  }
   // Gate-fix: id is captured as soon as extraction itself succeeds, outside
   // the rest of the protected try, so a later postRead/comparison failure
   // still reports the real id the mutating call created (resultIds: [id]),
@@ -286,10 +297,17 @@ export async function readbackByAttribute<T>(
   postRead: () => Promise<T>,
   extractAttribute: (obj: T) => unknown,
   sentValue: unknown,
+  ids: Record<string, string | undefined>,
 ): Promise<AttributeReadbackResult> {
   const pre = await preRead();
   const preValue = extractAttribute(pre);
-  await call();
+  try {
+    await call();
+  } catch (err) {
+    throw codeError("CHECK_FAILED", "the write's own API call failed before any readback could run.", {
+      detail: { ids, callError: toReadbackError(err) },
+    });
+  }
   try {
     const post = await postRead();
     const verified = extractAttribute(post) === sentValue;
@@ -313,9 +331,16 @@ export async function readbackByStateChange(
   preRead: () => Promise<{ uploadStatus: unknown; uploadStatusDate: unknown }>,
   call: () => Promise<void>,
   postRead: () => Promise<{ uploadStatus: unknown; uploadStatusDate: unknown }>,
+  ids: Record<string, string | undefined>,
 ): Promise<StateChangeReadbackResult> {
   const pre = await preRead();
-  await call();
+  try {
+    await call();
+  } catch (err) {
+    throw codeError("CHECK_FAILED", "the write's own API call failed before any readback could run.", {
+      detail: { ids, callError: toReadbackError(err) },
+    });
+  }
   try {
     const post = await postRead();
     const verified = post.uploadStatus !== pre.uploadStatus || post.uploadStatusDate !== pre.uploadStatusDate;
@@ -551,11 +576,13 @@ function registerUploadCommand(documentsCmd: Command): void {
                 }
               };
 
+              const ids: Record<string, string | undefined> = { documentId };
               const readback = await readbackByIdInList<{ id: string }>(
                 preRead,
                 call,
                 postRead,
                 (r) => (r as { id: string }).id,
+                ids,
               );
               await appendResultLine(
                 opId,
@@ -570,7 +597,12 @@ function registerUploadCommand(documentsCmd: Command): void {
                 throw codeError(
                   "CHECK_FAILED",
                   `documents upload: readback for ${file.fileName} did not verify.`,
-                  { detail: { fileName: file.fileName, readbackError: readback.readbackError } },
+                  {
+                    detail: {
+                      readback: { verified: false, readbackError: readback.readbackError },
+                      ids: { ...ids, uploadId: readback.id },
+                    },
+                  },
                 );
               }
               uploadedFiles.push({ fileName: file.fileName, uploadId: readback.id, readback: { verified: true } });
@@ -596,11 +628,13 @@ function registerUploadCommand(documentsCmd: Command): void {
                 return client.post(`controls/${controlId}/add-document-to-control`, { documentId });
               };
 
+              const ids: Record<string, string | undefined> = { documentId, controlId };
               const readback = await readbackByIdInList<{ id: string }>(
                 preRead,
                 call,
                 postRead,
                 (r) => (r as { control: { id: string } }).control.id,
+                ids,
               );
               await appendResultLine(
                 opId,
@@ -615,7 +649,12 @@ function registerUploadCommand(documentsCmd: Command): void {
                 throw codeError(
                   "CHECK_FAILED",
                   `documents upload: link to control ${controlId} did not verify.`,
-                  { detail: { controlId, readbackError: readback.readbackError } },
+                  {
+                    detail: {
+                      readback: { verified: false, readbackError: readback.readbackError },
+                      ids,
+                    },
+                  },
                 );
               }
               linkedControlIds.push({ controlId, readback: { verified: true } });
@@ -703,11 +742,13 @@ function registerLinkCommand(documentsCmd: Command): void {
             });
           };
 
+          const ids: Record<string, string | undefined> = { documentId };
           const readback = await readbackByIdInList<{ id: string }>(
             preRead,
             call,
             postRead,
             (r) => (r as { id: string }).id,
+            ids,
           );
           await appendResultLine(
             opId,
@@ -720,7 +761,10 @@ function registerLinkCommand(documentsCmd: Command): void {
           );
           if (!readback.verified) {
             throw codeError("CHECK_FAILED", "documents link: readback did not verify the new link.", {
-              detail: { readbackError: readback.readbackError },
+              detail: {
+                readback: { verified: false, readbackError: readback.readbackError },
+                ids: { ...ids, linkId: readback.id },
+              },
             });
           }
           return { documentId, linkId: readback.id, readback: { verified: true } };
@@ -771,12 +815,14 @@ function registerDocumentSetOwnerCommand(documentsCmd: Command): void {
             return client.post(`documents/${documentId}/set-owner`, { userId });
           };
 
+          const ids: Record<string, string | undefined> = { documentId, userId };
           const readback = await readbackByAttribute(
             preRead,
             call,
             postRead,
             (doc) => doc.ownerId,
             userId,
+            ids,
           );
           await appendResultLine(
             opId,
@@ -789,7 +835,10 @@ function registerDocumentSetOwnerCommand(documentsCmd: Command): void {
           );
           if (!readback.verified) {
             throw codeError("CHECK_FAILED", "documents set-owner: readback did not verify the new owner.", {
-              detail: { readbackError: readback.readbackError },
+              detail: {
+                readback: { verified: false, readbackError: readback.readbackError },
+                ids,
+              },
             });
           }
           return { documentId, ownerId: userId, readback: { verified: true } };
@@ -843,7 +892,8 @@ function registerSubmitCommand(documentsCmd: Command): void {
             await client.post(`documents/${documentId}/submit`);
           };
 
-          const readback = await readbackByStateChange(preRead, call, postRead);
+          const ids: Record<string, string | undefined> = { documentId };
+          const readback = await readbackByStateChange(preRead, call, postRead, ids);
           await appendResultLine(
             opId,
             CMD_SUBMIT,
@@ -857,7 +907,12 @@ function registerSubmitCommand(documentsCmd: Command): void {
             throw codeError(
               "CHECK_FAILED",
               "documents submit: readback did not detect a status change.",
-              { detail: { readbackError: readback.readbackError } },
+              {
+                detail: {
+                  readback: { verified: false, readbackError: readback.readbackError },
+                  ids,
+                },
+              },
             );
           }
           return {
@@ -910,12 +965,14 @@ function registerControlSetOwnerCommand(controlsCmd: Command): void {
             return client.post(`controls/${controlId}/set-owner`, { userId });
           };
 
+          const ids: Record<string, string | undefined> = { controlId, userId };
           const readback = await readbackByAttribute(
             preRead,
             call,
             postRead,
             (ctrl) => ctrl.owner?.id,
             userId,
+            ids,
           );
           await appendResultLine(
             opId,
@@ -928,7 +985,10 @@ function registerControlSetOwnerCommand(controlsCmd: Command): void {
           );
           if (!readback.verified) {
             throw codeError("CHECK_FAILED", "controls set-owner: readback did not verify the new owner.", {
-              detail: { readbackError: readback.readbackError },
+              detail: {
+                readback: { verified: false, readbackError: readback.readbackError },
+                ids,
+              },
             });
           }
           return { controlId, ownerId: userId, readback: { verified: true } };
@@ -980,11 +1040,13 @@ function registerAddDocumentCommand(controlsCmd: Command): void {
             return client.post(`controls/${controlId}/add-document-to-control`, { documentId });
           };
 
+          const ids: Record<string, string | undefined> = { controlId, documentId };
           const readback = await readbackByIdInList<{ id: string }>(
             preRead,
             call,
             postRead,
             (r) => (r as { document: { id: string } }).document.id,
+            ids,
           );
           await appendResultLine(
             opId,
@@ -997,7 +1059,10 @@ function registerAddDocumentCommand(controlsCmd: Command): void {
           );
           if (!readback.verified) {
             throw codeError("CHECK_FAILED", "controls add-document: readback did not verify the mapping.", {
-              detail: { readbackError: readback.readbackError },
+              detail: {
+                readback: { verified: false, readbackError: readback.readbackError },
+                ids,
+              },
             });
           }
           return { controlId, documentId, readback: { verified: true } };
